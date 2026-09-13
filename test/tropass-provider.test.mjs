@@ -11,12 +11,16 @@ describe("Tropass provider plugin", () => {
     const config = makeConfig("tropass/stale");
     const fetchModels = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({data: [{id: "first-model"}, {id: "GLM-5.2"}, {id: "first-model"}]}),
+      json: async () => ({data: [
+        {id: "first-model", upstream_type: "inference", modality: "chat"},
+        {id: "GLM-5.2", upstream_type: "inference", modality: "chat"},
+        {id: "first-model", upstream_type: "inference", modality: "chat"},
+      ]}),
     });
 
     await loadTropassModels(config, fetchModels);
 
-    expect(fetchModels).toHaveBeenCalledWith("https://llm.example/v1/models", {
+    expect(fetchModels).toHaveBeenCalledWith("https://llm.example/v1/models?upstream_type=inference&modality=chat", {
       headers: {Authorization: "Bearer token"},
       signal: expect.any(globalThis.AbortSignal),
     });
@@ -35,7 +39,10 @@ describe("Tropass provider plugin", () => {
 
     await loadTropassModels(config, async () => ({
       ok: true,
-      json: async () => ({data: [{id: "first-model"}, {id: "second-model"}]}),
+      json: async () => ({data: [
+        {id: "first-model", upstream_type: "inference", modality: "chat"},
+        {id: "second-model", upstream_type: "inference", modality: "chat"},
+      ]}),
     }));
 
     expect(config.model).toBe("tropass/first-model");
@@ -53,6 +60,23 @@ describe("Tropass provider plugin", () => {
 
     expect(config.model).toBeUndefined();
     expect(config.provider.tropass.models).toEqual({});
+  });
+
+  it("excludes ML and non-chat models when a gateway ignores catalog filters", async () => {
+    vi.spyOn(globalThis.console, "warn").mockImplementation(() => {});
+    const config = makeConfig("tropass/stale");
+
+    await loadTropassModels(config, async () => ({
+      ok: true,
+      json: async () => ({data: [
+        {id: "ml-translator", upstream_type: "ml", modality: "chat"},
+        {id: "embedding", upstream_type: "inference", modality: "embedding"},
+        {id: "chat", upstream_type: "inference", modality: "chat"},
+      ]}),
+    }));
+
+    expect(config.model).toBe("tropass/chat");
+    expect(config.provider.tropass.models).toEqual({chat: {name: "chat"}});
   });
 
   it("preserves another provider's default when discovery fails", async () => {
