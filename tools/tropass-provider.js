@@ -1,5 +1,6 @@
 const providerId = "tropass";
 const preferredModel = "GLM-5.2";
+const callableModelFilters = {upstream_type: "inference", modality: "chat"};
 
 export async function loadTropassModels(config, fetchModels = fetch) {
   if (typeof config.model === "string" && config.model.startsWith(`${providerId}/`)) {
@@ -18,7 +19,11 @@ export async function loadTropassModels(config, fetchModels = fetch) {
   }
 
   try {
-    const response = await fetchModels(`${baseURL.replace(/\/+$/, "")}/models`, {
+    const catalogURL = new URL(`${baseURL.replace(/\/+$/, "")}/models`);
+    for (const [name, value] of Object.entries(callableModelFilters)) {
+      catalogURL.searchParams.set(name, value);
+    }
+    const response = await fetchModels(catalogURL.toString(), {
       headers: {Authorization: apiKey.startsWith("Bearer ") ? apiKey : `Bearer ${apiKey}`},
       signal: AbortSignal.timeout(3_000),
     });
@@ -29,7 +34,9 @@ export async function loadTropassModels(config, fetchModels = fetch) {
 
     const modelIds = [...new Set(payload.data.flatMap((model) => {
       const modelId = typeof model?.id === "string" ? model.id.trim() : "";
-      return modelId ? [modelId] : [];
+      return modelId && model.upstream_type === callableModelFilters.upstream_type && model.modality === callableModelFilters.modality
+        ? [modelId]
+        : [];
     }))];
     provider.models = Object.fromEntries(modelIds.map((modelId) => [
       modelId,
