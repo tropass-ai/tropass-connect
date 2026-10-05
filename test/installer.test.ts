@@ -1,6 +1,8 @@
 import fs from "node:fs";
+import {createRequire} from "node:module";
 import os from "node:os";
 import path from "node:path";
+import {pathToFileURL} from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -36,7 +38,7 @@ afterEach(() => {
 });
 
 describe("installTropass", () => {
-  it("writes OpenCode project config and copies native skills", () => {
+  it("writes OpenCode project config and copies native skills", async () => {
     const projectDir = createTempDir();
     const configPath = path.join(projectDir, "opencode.json");
     const agentsPath = path.join(projectDir, "AGENTS.md");
@@ -65,6 +67,10 @@ describe("installTropass", () => {
     writeJson(path.join(projectDir, ".opencode", "tui.json"), {
       plugin: ["existing-plugin", "./tropass-usage.mjs", "./tropass.mjs"],
     });
+    writeJson(path.join(projectDir, ".opencode", "package.json"), {
+      name: "existing-plugin-dependencies",
+      dependencies: {"existing-package": "1.0.0"},
+    });
     fs.writeFileSync(legacyPluginPath, "// plugin from an older installer\n");
     fs.writeFileSync(agentsPath, "# Existing agent notes\n");
 
@@ -81,7 +87,11 @@ describe("installTropass", () => {
     expect(result.skillPaths).toEqual([gatewaySkillPath, displaySkillPath]);
 
     expect(result.toolPaths).toEqual([toolPath, toolScriptPath]);
-    expect(result.pluginPaths).toEqual([tropassPluginPath, providerPluginPath]);
+    expect(result.pluginPaths).toEqual([
+      tropassPluginPath, providerPluginPath,
+      ...["commands/usage.mjs", "commands/doctor.mjs"]
+        .map((relativePath) => path.join(projectDir, ".opencode", relativePath)),
+    ]);
 
     const config = readJson(result.configPath);
     expect(config.theme).toBe("system");
@@ -131,7 +141,7 @@ describe("installTropass", () => {
     expect(toolScript).not.toContain(TEST_MCP_GATEWAY_URL);
     expect(toolScript).not.toContain(TEST_API_TOKEN);
     const tropassPlugin = fs.readFileSync(tropassPluginPath, "utf8");
-    expect(tropassPlugin).toContain('slashName: "usage"');
+    expect(tropassPlugin).toContain(Buffer.from(TEST_UVX_COMMAND).toString("base64"));
     expect(tropassPlugin).toContain(
       Buffer.from("https://апи.ллм.тропасс.рф/api/rpc/fetch-token-usage/").toString("base64"),
     );
@@ -141,6 +151,23 @@ describe("installTropass", () => {
     expect(tropassPlugin).toContain(`const currentVersion = ${JSON.stringify(readJson("package.json").version)};`);
     expect(tropassPlugin).toContain('const installScope = "project";');
     expect(tropassPlugin).not.toContain("{{");
+    expect(readJson(path.join(projectDir, ".opencode", "package.json"))).toEqual({
+      name: "existing-plugin-dependencies",
+      dependencies: {"existing-package": "1.0.0", semver: readJson("package.json").dependencies.semver},
+    });
+    // OpenCode installs these dependencies at startup; reuse the local package here.
+    const dependencyDir = path.join(projectDir, ".opencode", "node_modules");
+    fs.mkdirSync(dependencyDir, {recursive: true});
+    fs.symlinkSync(path.dirname(createRequire(import.meta.url).resolve("semver/package.json")), path.join(dependencyDir, "semver"), "junction");
+    const {default: installedPlugin} = await import(pathToFileURL(tropassPluginPath).href);
+    const registerLayer = vi.fn();
+    await installedPlugin.tui({keymap: {registerLayer}});
+    expect(registerLayer).toHaveBeenCalledWith(expect.objectContaining({
+      commands: expect.arrayContaining([
+        expect.objectContaining({slashName: "usage"}),
+        expect.objectContaining({slashName: "doctor"}),
+      ]),
+    }));
     expect(fs.readFileSync(providerPluginPath, "utf8")).toContain("loadTropassModels");
     expect(fs.existsSync(legacyPluginPath)).toBe(false);
     expect(readJson(path.join(projectDir, ".opencode", "tui.json")).plugin).toEqual([
@@ -188,7 +215,13 @@ describe("installTropass", () => {
     });
     expect(fs.readFileSync(globalToolPath, "utf8")).toContain(`GATEWAY_URL = "${TEST_MCP_GATEWAY_URL}"`);
     expect(fs.readFileSync(globalToolPath, "utf8")).toContain(`GATEWAY_API_TOKEN = "${TEST_API_TOKEN}"`);
-    expect(result.pluginPaths).toEqual([globalTropassPluginPath, globalProviderPluginPath]);
+    expect(result.pluginPaths).toEqual([
+      globalTropassPluginPath, globalProviderPluginPath,
+      ...["commands/usage.mjs", "commands/doctor.mjs"]
+        .map((relativePath) => path.join(homeDir, ".config", "opencode", relativePath)),
+    ]);
+    expect(readJson(path.join(homeDir, ".config", "opencode", "package.json")).dependencies.semver)
+      .toBe(readJson("package.json").dependencies.semver);
     expect(readJson(path.join(homeDir, ".config", "opencode", "tui.json")).plugin).toEqual([
       "./tropass.mjs",
     ]);

@@ -5,11 +5,10 @@ import {afterEach, describe, expect, it, vi} from "vitest";
 import plugin, {
   buildUpdateCommand,
   checkForUpdate,
-  formatUsage,
-  isNewerVersion,
   REMIND_DELAY_MS,
   runInstallerUpdate,
 } from "../tools/tropass.mjs";
+import {formatUsage} from "../tools/commands/usage.mjs";
 
 const UPDATE_CHECK_KEY = Symbol.for("tropass.update.checkStarted");
 
@@ -100,8 +99,10 @@ describe("Tropass plugin", () => {
     ["2.2.1", "2.2.1", false],
     ["2.1.9", "2.2.0", false],
     ["2.3.0-beta.1", "2.2.0", false],
-  ])("compares stable versions %s and %s", (candidate, installed, expected) => {
-    expect(isNewerVersion(candidate, installed)).toBe(expected);
+  ])("offers only newer stable updates (%s vs %s)", async (candidate, installed, expected) => {
+    const {api} = createUpdateApi();
+    await checkForUpdate(api, {fetchLatestVersion: async () => candidate, version: installed});
+    expect(api.ui.dialog.replace).toHaveBeenCalledTimes(expected ? 1 : 0);
   });
 
   it("shows native update actions and postpones for 24 hours", async () => {

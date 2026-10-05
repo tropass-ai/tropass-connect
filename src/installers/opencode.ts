@@ -6,7 +6,7 @@ import {
   DEFAULT_TOKEN_HEADER,
   MCP_MODEL_CALL_VERSION_HEADER,
 } from "../constants.js";
-import type {ModelCallVersion} from "../types.js";
+import type {JsonObject, ModelCallVersion} from "../types.js";
 import type {HarnessInstaller} from "./types.js";
 import {
   buildBearerToken,
@@ -30,9 +30,10 @@ const SKILL_NAMES = ["tropass-gateway", "agent-response-display"];
 const TOOL_FILE_NAME = "wait_for_model_task.ts";
 const TOOL_SCRIPT_NAME = "wait_for_model_task.py";
 const PLUGIN_FILE_NAME = "tropass.mjs";
+const PLUGIN_SUPPORT_FILES = ["commands/usage.mjs", "commands/doctor.mjs"];
 const PROVIDER_PLUGIN_FILE_NAME = "tropass-provider.js";
 const LEGACY_PLUGIN_FILE_NAME = "tropass-usage.mjs";
-const INSTALLER_VERSION = readInstallerVersion();
+const INSTALLER_PACKAGE = readInstallerPackage();
 
 export const opencodeInstaller: HarnessInstaller = {
   installConfig(options, configPath) {
@@ -103,6 +104,14 @@ export const opencodeInstaller: HarnessInstaller = {
   },
 
   installPlugins(configDir, configPath, options) {
+    const packagePath = path.join(configDir, "package.json");
+    const pluginPackage = readJsonFile(packagePath);
+    pluginPackage.dependencies = {
+      ...readObjectProperty(pluginPackage, "dependencies"),
+      semver: readObjectProperty(INSTALLER_PACKAGE, "dependencies").semver,
+    };
+    writeJsonFile(packagePath, pluginPackage);
+
     const pluginPath = path.join(configDir, PLUGIN_FILE_NAME);
     const template = fs.readFileSync(
       path.join(PACKAGED_TOOLS_DIRECTORY, PLUGIN_FILE_NAME),
@@ -115,10 +124,16 @@ export const opencodeInstaller: HarnessInstaller = {
         API_TOKEN: Buffer.from(stripBearerToken(options.apiToken)).toString("base64"),
         CONFIG_PATH: Buffer.from(configPath).toString("base64"),
         PROJECT_DIR: Buffer.from(options.scope === "project" ? path.dirname(configDir) : "").toString("base64"),
-        INSTALLER_VERSION,
+        UVX_COMMAND: Buffer.from(options.uvxCommand ?? "").toString("base64"),
+        INSTALLER_VERSION: INSTALLER_PACKAGE.version,
         INSTALL_SCOPE: options.scope,
       }),
     );
+    const supportPaths = PLUGIN_SUPPORT_FILES.map((relativePath) => {
+      const supportPath = path.join(configDir, relativePath);
+      writeTextFile(supportPath, fs.readFileSync(path.join(PACKAGED_TOOLS_DIRECTORY, relativePath), "utf8"));
+      return supportPath;
+    });
     const providerPluginPath = path.join(configDir, "plugins", PROVIDER_PLUGIN_FILE_NAME);
     writeTextFile(
       providerPluginPath,
@@ -135,7 +150,7 @@ export const opencodeInstaller: HarnessInstaller = {
     const tropassPlugins = new Set([`./${PLUGIN_FILE_NAME}`, `./${LEGACY_PLUGIN_FILE_NAME}`]);
     tuiConfig.plugin = [...(plugins ?? []).filter((plugin) => !tropassPlugins.has(String(plugin))), `./${PLUGIN_FILE_NAME}`];
     writeJsonFile(tuiConfigPath, tuiConfig);
-    return [pluginPath, providerPluginPath];
+    return [pluginPath, providerPluginPath, ...supportPaths];
   },
 };
 
@@ -204,7 +219,7 @@ function buildGatewayUrl(mcpUrl: string): string {
   return mcpUrl.replace(/\/mcp$/, "").replace(/\/+$/, "");
 }
 
-function readInstallerVersion(): string {
+function readInstallerPackage(): JsonObject & {version: string} {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const packagePaths = ["../../package.json", "../../../package.json"]
     .map((relativePath) => path.resolve(moduleDirectory, relativePath));
@@ -212,9 +227,10 @@ function readInstallerVersion(): string {
   if (!packagePath) {
     throw new Error("Не найден package.json установщика Tropass.");
   }
-  const version = readJsonFile(packagePath).version;
+  const payload = readJsonFile(packagePath);
+  const version = payload.version;
   if (typeof version !== "string") {
     throw new Error(`В ${packagePath} не указана версия установщика Tropass.`);
   }
-  return version;
+  return {...payload, version};
 }
