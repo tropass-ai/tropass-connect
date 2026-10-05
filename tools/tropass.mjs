@@ -1,11 +1,17 @@
 import {spawn} from "node:child_process";
 import process from "node:process";
 
+import semver from "semver";
+
+import {createDoctorCommand} from "./commands/doctor.mjs";
+import {createUsageCommand} from "./commands/usage.mjs";
+
 const decode = (value) => Buffer.from(value, "base64").toString();
 const usageUrl = decode("{{USAGE_URL}}");
 const apiToken = decode("{{API_TOKEN}}");
 const configPath = decode("{{CONFIG_PATH}}");
 const projectDir = decode("{{PROJECT_DIR}}");
+const uvxCommand = decode("{{UVX_COMMAND}}");
 const currentVersion = "{{INSTALLER_VERSION}}";
 const installScope = "{{INSTALL_SCOPE}}";
 const installerPackage = "@tropass/connect@latest";
@@ -14,51 +20,6 @@ const remindAfterKey = "tropass.update.remindAfter";
 const updateCheckKey = Symbol.for("tropass.update.checkStarted");
 
 export const REMIND_DELAY_MS = 24 * 60 * 60 * 1000;
-
-export function formatUsage(data, locale, timeZone) {
-  const usage = data?.usage ?? data?.data ?? data;
-  const used = Number(usage?.used ?? usage?.used_tokens);
-  const limitValue = usage?.limit ?? usage?.limit_tokens ?? usage?.initial_limit_tokens;
-  const remainingValue = usage?.remaining ?? usage?.remaining_tokens;
-  const limit = limitValue === null ? null : Number(limitValue);
-  const remaining = remainingValue === null ? null : Number(remainingValue);
-  const reset = usage?.resetAt ?? usage?.reset_time ?? usage?.reset_at;
-  if (!Number.isFinite(used) || (limit !== null && !Number.isFinite(limit)) || (remaining !== null && !Number.isFinite(remaining)) || reset === undefined) {
-    return JSON.stringify(data, null, 2);
-  }
-
-  const percent = limit === null ? null : Math.min(100, Math.max(0, limit > 0 ? Math.round(used / limit * 100) : 0));
-  const filled = percent === null ? 0 : Math.round(percent * 24 / 100);
-  const number = new Intl.NumberFormat(locale).format;
-  const resetDate = new Date(typeof reset === "number" && reset < 1e12 ? reset * 1000 : reset);
-  const resetText = reset === null ? "Not scheduled" : Number.isNaN(resetDate.valueOf())
-    ? String(reset)
-    : new Intl.DateTimeFormat(locale, {dateStyle: "medium", timeStyle: "short", timeZone}).format(resetDate);
-
-  return [
-    "Weekly tokens",
-    "",
-    percent === null ? "──────────────────────── ∞" : `${"█".repeat(filled)}${"░".repeat(24 - filled)} ${percent}%`,
-    "",
-    `Used       ${number(used)}`,
-    `Remaining  ${remaining === null ? "Unlimited" : number(remaining)}`,
-    `Limit      ${limit === null ? "Unlimited" : number(limit)}`,
-    `Resets     ${resetText}`,
-  ].join("\n");
-}
-
-export function isNewerVersion(candidate, installed) {
-  const candidateParts = parseStableVersion(candidate);
-  const installedParts = parseStableVersion(installed);
-  if (!candidateParts || !installedParts) return false;
-
-  for (let index = 0; index < candidateParts.length; index += 1) {
-    if (candidateParts[index] !== installedParts[index]) {
-      return candidateParts[index] > installedParts[index];
-    }
-  }
-  return false;
-}
 
 export function buildUpdateCommand({
   packageSpec = installerPackage,
@@ -113,14 +74,9 @@ export async function checkForUpdate(api, {
 
   try {
     const latestVersion = await fetchLatestVersion();
-    if (!isNewerVersion(latestVersion, version)) return;
+    if (!semver.satisfies(latestVersion, `>${version}`)) return;
     showUpdateDialog(api, version, latestVersion, installUpdate, now);
   } catch {}
-}
-
-function parseStableVersion(value) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value);
-  return match?.slice(1).map(Number);
 }
 
 async function waitForKv(api) {
@@ -199,59 +155,40 @@ async function installWithFeedback(api, installUpdate) {
   }
 }
 
-function registerUsage(api) {
-  const run = async () => {
-    try {
-      api.ui.toast({variant: "info", message: "Loading Tropass usage…", duration: 2_000});
-      const response = await fetch(usageUrl, {headers: {Authorization: `Bearer ${apiToken}`}});
-      const body = await response.text();
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${body}`);
-      let message = body;
-      try {
-        message = formatUsage(JSON.parse(body));
-      } catch {}
-      api.ui.dialog.replace(() => api.ui.DialogAlert({
-        title: "Tropass usage",
-        message,
-        onConfirm: () => api.ui.dialog.clear(),
-      }));
-    } catch (error) {
-      api.ui.toast({
-        variant: "error",
-        message: error instanceof Error ? error.message : String(error),
-        duration: 10_000,
-      });
-    }
-  };
+function registerCommands(api) {
+  const commands = [
+    createUsageCommand(api, {usageUrl, apiToken}),
+    createDoctorCommand(api, {uvxCommand, apiToken}),
+  ];
 
   if (api.command) {
-    api.command.register(() => [{
-      title: "Tropass token usage",
-      value: "tropass.usage",
+    api.command.register(() => commands.map(({name, title, run}) => ({
+      title,
+      value: `tropass.${name}`,
       category: "Tropass",
-      slash: {name: "usage"},
+      slash: {name},
       onSelect: run,
-    }]);
+    })));
     return;
   }
 
   api.keymap.registerLayer({
     mode: "base",
-    commands: [{
-      name: "tropass.usage",
-      title: "Tropass token usage",
+    commands: commands.map(({name, title, run}) => ({
+      name: `tropass.${name}`,
+      title,
       category: "Tropass",
       namespace: "palette",
-      slashName: "usage",
+      slashName: name,
       run,
-    }],
+    })),
   });
 }
 
 export default {
   id: "tropass",
   async tui(api) {
-    registerUsage(api);
+    registerCommands(api);
     if (api.kv && api.ui.DialogSelect) void checkForUpdate(api);
   },
 };

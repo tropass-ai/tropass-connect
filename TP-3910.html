@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>TP-3910 — OpenAI API за пределами LLM в OpenCode</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18231f; background: #f4f6f2; }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.55; }
+    main { max-width: 1120px; margin: auto; padding: 48px 24px 72px; }
+    a { color: #17634b; text-underline-offset: 3px; }
+    a:focus-visible { outline: 3px solid #cf7b32; outline-offset: 3px; }
+    .eyebrow { color: #527065; font-size: .8rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2 { line-height: 1.18; letter-spacing: -.035em; }
+    h1 { max-width: 850px; margin: 12px 0 18px; font-size: clamp(2.3rem, 5vw, 4.2rem); }
+    h2 { margin: 0 0 16px; font-size: 1.65rem; }
+    p { max-width: 850px; }
+    .lead { font-size: 1.18rem; color: #40534a; }
+    .verdict { margin: 36px 0 42px; padding: 26px 30px; border-left: 5px solid #368e68; border-radius: 10px; background: #e5f3e9; }
+    .verdict strong { display: block; margin-bottom: 6px; font-size: 1.2rem; }
+    .verdict p { margin: 0; }
+    section { margin-top: 42px; }
+    .table-wrap { overflow-x: auto; border: 1px solid #dce5dc; border-radius: 12px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; min-width: 680px; }
+    th, td { padding: 15px 17px; text-align: left; vertical-align: top; border-bottom: 1px solid #e5ebe5; }
+    th { background: #edf2eb; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { width: 24%; }
+    td:nth-child(2) { width: 34%; }
+    td:nth-child(3) { width: 42%; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .88em; overflow-wrap: anywhere; }
+    footer { margin-top: 48px; padding-top: 22px; border-top: 1px solid #d3ded4; color: #526258; font-size: .92rem; }
+    @media (max-width: 600px) { main { padding: 30px 16px 52px; } .verdict { padding: 22px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Исследование · TP-3910 · 23 сентября 2026</div>
+    <h1>Что ещё из OpenAI API может пригодиться OpenCode?</h1>
+    <p class="lead">Какие возможности OpenAI-совместимого API могут быть полезны в интеграции Tropass с OpenCode.</p>
+  </header>
+
+  <div class="verdict" role="note">
+    <strong>Исследование показало: прямой API может дать OpenCode три полезных сценария.</strong>
+    <p>Наиболее интересны голосовой ввод до запуска агента и сжатие длинной сессии в OpenCode V2. Озвучивание результата — дополнительная возможность. Это кандидаты для проверки, а не утверждение, что достаточно опубликовать новые ручки: каждому сценарию нужна интеграция на стороне OpenCode.</p>
+  </div>
+
+  <section aria-labelledby="findings">
+    <h2 id="findings">Что может быть полезно</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Фича</th><th scope="col">Польза</th><th scope="col">Ручка и механизм</th></tr></thead>
+        <tbody>
+          <tr><td>Голосовой ввод</td><td>Надиктовать задачу и получить текст в поле запроса до запуска агента. Ручка пригодится и другим клиентам.</td><td><a href="https://developers.openai.com/api/docs/guides/speech-to-text"><code>POST /v1/audio/transcriptions</code></a> в Tropass; клиентский код или плагин OpenCode записывает аудио и вставляет расшифровку в запрос.</td></tr>
+          <tr><td>Сжатие длинной сессии в V2</td><td>Продолжать длительную работу, освобождая место в контексте модели.</td><td><a href="https://developers.openai.com/api/docs/guides/compaction"><code>POST /v1/responses</code> и <code>POST /v1/responses/compact</code> либо <code>context_management</code></a>. Нужна поддержка нативного checkpoint в шлюзе и модели; проверить, какой маршрут использует OpenCode V2.</td></tr>
+          <tr><td>Озвучивание результата</td><td>Слушать краткий итог завершённой задачи, не возвращаясь к терминалу. Менее приоритетный сценарий.</td><td><a href="https://developers.openai.com/api/docs/guides/text-to-speech"><code>POST /v1/audio/speech</code></a> для других клиентов и, при необходимости, плагин OpenCode, вызывающий его после завершения задачи.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="v2-compaction">
+    <h2 id="v2-compaction">Почему стоит проверить Responses и сжатие V2</h2>
+    <p><a href="https://opencode.ai/v2/docs/providers">OpenCode V2 перечисляет</a> отдельный провайдер <code>@opencode/ai/providers/openai-compatible/responses</code>. В настройках сжатия есть режим <code>native</code>; для Responses OpenCode применяет потоковое сжатие, если маршрут его поддерживает, либо отдельный endpoint там, где доступен только он. Поддержка зависит от конкретного маршрута, развёртывания и модели — одно название пакета её не гарантирует. <a href="https://opencode.ai/v2/docs/compaction">Документация V2 по сжатию</a>.</p>
+    <p>По <a href="https://developers.openai.com/api/docs/guides/compaction">контракту OpenAI</a>, результат сжатия — не обычное текстовое резюме, а новый контекст с непрозрачным checkpoint. Его нужно передать в следующий <code>POST /v1/responses</code>. Поэтому адаптер, который просто переименует <code>chat/completions</code> в <code>responses</code> или вернёт текстовое summary из <code>/responses/compact</code>, не докажет совместимость.</p>
+    <p>Минимальный эксперимент: настроить Responses-маршрут Tropass в V2, пройти обычный цикл с tool calls, запустить ручное сжатие и продолжить сессию. Зафиксировать фактические запросы OpenCode: вызывает ли он <code>/responses/compact</code> или передаёт <code>context_management</code> в потоковом <code>/responses</code>, и воспроизводится ли checkpoint после следующего шага. До такой проверки это кандидат, а не обещанная возможность.</p>
+  </section>
+
+  <section aria-labelledby="when-api">
+    <h2 id="when-api">Когда прямой API полезнее MCP</h2>
+    <p>Для голосового ввода и озвучивания вызов делает клиентский код до или после работы агента; OpenAI-совместимая ручка позволяет использовать сервис через обычный SDK и в OpenCode, и в других клиентах. Действия, которые агент выбирает сам во время работы, уже доступны ему через MCP.</p>
+  </section>
+
+  <footer>
+    Источники: <a href="https://developers.openai.com/api/reference/overview">OpenAI API Reference</a>,
+    <a href="https://opencode.ai/docs/providers">OpenCode Providers</a>,
+    <a href="https://opencode.ai/docs/plugins/">OpenCode Plugins</a>,
+    <a href="https://opencode.ai/v2/docs/compaction">OpenCode V2 Compaction</a>,
+    <a href="https://developers.openai.com/api/docs/guides/compaction">OpenAI Compaction</a>.
+    Конфигурация Tropass Connect: <a href="src/installers/opencode.ts">установщик</a> и <a href="tools/tropass-provider.js">загрузка списка моделей</a>.
+  </footer>
+</main>
+</body>
+</html>
