@@ -7,14 +7,14 @@ afterEach(() => {
 });
 
 describe("Tropass provider plugin", () => {
-  it("loads the live catalog and prefers GLM-5.2", async () => {
+  it("loads catalog metadata, keeps the first duplicate and prefers GLM-5.2", async () => {
     const config = makeConfig("tropass/stale");
     const fetchModels = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({data: [
-        {id: "first-model", modality: "chat", restriction: "none"},
-        {id: "GLM-5.2", modality: "vision", restriction: "none"},
-        {id: "first-model", modality: "chat", restriction: "none"},
+        {id: "first-model", name: "First model", context_length: 131_072, modality: "chat", restriction: "none"},
+        {id: "GLM-5.2", name: "GLM 5.2", context_length: 200_000, modality: "vision", restriction: "none"},
+        {id: "first-model", name: "Duplicate", context_length: 8_192, modality: "vision", restriction: "none"},
       ]}),
     });
 
@@ -26,12 +26,61 @@ describe("Tropass provider plugin", () => {
     });
     expect(config.model).toBe("tropass/GLM-5.2");
     expect(config.provider.tropass.models).toEqual({
-      "first-model": {name: "first-model"},
+      "first-model": {
+        name: "First model",
+        modalities: {input: ["text"], output: ["text"]},
+        limit: {context: 131_072},
+      },
       "GLM-5.2": {
-        name: "GLM-5.2",
+        name: "GLM 5.2",
         modalities: {input: ["text", "image"], output: ["text"]},
+        limit: {context: 200_000},
       },
     });
+  });
+
+  it.each(["chat", "vision"])("derives %s modalities from the catalog for every model", async (modality) => {
+    const config = makeConfig();
+
+    await loadTropassModels(config, async () => ({
+      ok: true,
+      json: async () => ({data: [
+        {id: "GLM-5.2", modality, restriction: "none"},
+        {id: "another-model", modality, restriction: "none"},
+      ]}),
+    }));
+
+    for (const model of Object.values(config.provider.tropass.models)) {
+      expect(model.modalities).toEqual({
+        input: modality === "vision" ? ["text", "image"] : ["text"],
+        output: ["text"],
+      });
+    }
+  });
+
+  it.each([undefined, null, 0, -1, 1.5, "131072", NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "omits missing or invalid context limits: %j", async (context_length) => {
+      const config = makeConfig();
+
+      await loadTropassModels(config, async () => ({
+        ok: true,
+        json: async () => ({data: [{id: "model", context_length, modality: "chat", restriction: "none"}]}),
+      }));
+
+      expect(config.model).toBe("tropass/model");
+      expect(config.provider.tropass.models.model).not.toHaveProperty("limit");
+    },
+  );
+
+  it.each([undefined, null, "", "   ", 123])("falls back to the model ID for missing or invalid names: %j", async (name) => {
+    const config = makeConfig();
+
+    await loadTropassModels(config, async () => ({
+      ok: true,
+      json: async () => ({data: [{id: "model", name, modality: "chat", restriction: "none"}]}),
+    }));
+
+    expect(config.provider.tropass.models.model.name).toBe("model");
   });
 
   it("uses the first returned model when GLM-5.2 is unavailable", async () => {
@@ -74,7 +123,10 @@ describe("Tropass provider plugin", () => {
     }));
 
     expect(config.model).toBe("tropass/first-model");
-    expect(config.provider.tropass.models).toEqual({"first-model": {name: "first-model"}});
+    expect(config.provider.tropass.models).toEqual({"first-model": {
+      name: "first-model",
+      modalities: {input: ["text"], output: ["text"]},
+    }});
   });
 
   it.each([

@@ -27,21 +27,25 @@ export async function loadTropassModels(config, fetchModels = fetch) {
     const payload = await response.json();
     if (!Array.isArray(payload?.data)) throw new TypeError("Invalid Tropass model catalog.");
 
-    const modelIds = [...new Set(payload.data.flatMap((model) => {
+    const models = new Map();
+    for (const model of payload.data) {
       if (!["chat", "vision"].includes(model?.modality)
-        || model?.restriction !== "none") return [];
+        || model?.restriction !== "none") continue;
       const modelId = typeof model?.id === "string" ? model.id.trim() : "";
-      return modelId ? [modelId] : [];
-    }))];
-    provider.models = Object.fromEntries(modelIds.map((modelId) => [
-      modelId,
-      {
-        name: modelId,
-        ...(modelId === preferredModel && {
-          modalities: {input: ["text", "image"], output: ["text"]},
+      if (!modelId || models.has(modelId)) continue;
+      models.set(modelId, {
+        name: typeof model.name === "string" && model.name.trim() ? model.name : modelId,
+        modalities: {
+          input: model.modality === "vision" ? ["text", "image"] : ["text"],
+          output: ["text"],
+        },
+        ...(Number.isSafeInteger(model.context_length) && model.context_length > 0 && {
+          limit: {context: model.context_length},
         }),
-      },
-    ]));
+      });
+    }
+    provider.models = Object.fromEntries(models);
+    const modelIds = [...models.keys()];
     if (!modelIds.length) {
       console.warn("Tropass model discovery returned no models.");
       return;
