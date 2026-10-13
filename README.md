@@ -47,8 +47,6 @@ npx -y @tropass/connect@latest opencode --local
 
 > При проектной установке `opencode.json` и `.opencode/tropass.mjs` содержат API-токен. Не добавляйте эти файлы в публичный репозиторий.
 
-В список моделей OpenCode попадают только модели без ограничений (`restriction=none`) с модальностью `chat` или `vision`. Общий каталог `/v1/models` содержит все доступные модальности, включая `embedding`, `transcription` и `tts`; поле `modality` и фильтр `?modality=embedding` позволяют найти модели для других задач.
-
 ### Асинхронные задачи моделей
 
 Для работы с моделями нужны [uv](https://docs.astral.sh/uv/getting-started/installation/) и команда `uvx`. Длительные задачи запускаются асинхронно: агент отправляет задачу и ждёт результат отдельным инструментом.
