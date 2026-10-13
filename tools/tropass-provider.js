@@ -28,6 +28,8 @@ export async function loadTropassModels(config, fetchModels = fetch) {
     if (!Array.isArray(payload?.data)) throw new TypeError("Invalid Tropass model catalog.");
 
     const modelIds = [...new Set(payload.data.flatMap((model) => {
+      if (!["chat", "vision"].includes(model?.modality)
+        || model?.restriction !== "none") return [];
       const modelId = typeof model?.id === "string" ? model.id.trim() : "";
       return modelId ? [modelId] : [];
     }))];
