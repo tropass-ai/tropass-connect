@@ -7,11 +7,14 @@ afterEach(() => {
 });
 
 describe("Tropass provider plugin", () => {
-  it("loads the live catalog and prefers GLM-5.2", async () => {
+  it("loads display names and selects the default model", async () => {
     const config = makeConfig("tropass/stale");
     const fetchModels = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({data: [{id: "first-model"}, {id: "GLM-5.2"}, {id: "first-model"}]}),
+      json: async () => ({data: [
+        {id: "first-model", name: "First Model", restriction: "none", is_default: true},
+        {id: "GLM-5.2", name: "GLM 5.2", restriction: "none", is_default: false},
+      ]}),
     });
 
     await loadTropassModels(config, fetchModels);
@@ -20,30 +23,31 @@ describe("Tropass provider plugin", () => {
       headers: {Authorization: "Bearer token"},
       signal: expect.any(globalThis.AbortSignal),
     });
-    expect(config.model).toBe("tropass/GLM-5.2");
+    expect(config.model).toBe("tropass/first-model");
     expect(config.provider.tropass.models).toEqual({
-      "first-model": {name: "first-model"},
+      "first-model": {name: "First Model"},
       "GLM-5.2": {
-        name: "GLM-5.2",
+        name: "GLM 5.2",
         modalities: {input: ["text", "image"], output: ["text"]},
       },
     });
   });
 
-  it("uses the first returned model when GLM-5.2 is unavailable", async () => {
-    const config = makeConfig();
-
-    await loadTropassModels(config, async () => ({
-      ok: true,
-      json: async () => ({data: [{id: "first-model"}, {id: "second-model"}]}),
-    }));
-
-    expect(config.model).toBe("tropass/first-model");
-  });
-
   it.each([
     ["an HTTP error", async () => ({ok: false})],
     ["a malformed response", async () => ({ok: true, json: async () => ({data: null})})],
+    ["a legacy response", async () => ({ok: true, json: async () => ({data: [{id: "legacy-model"}]})})],
+    ["a catalog without a default", async () => ({
+      ok: true,
+      json: async () => ({data: [{id: "model", name: "Model", restriction: "none", is_default: false}]}),
+    })],
+    ["a catalog with multiple defaults", async () => ({
+      ok: true,
+      json: async () => ({data: [
+        {id: "first", name: "First", restriction: "none", is_default: true},
+        {id: "second", name: "Second", restriction: "none", is_default: true},
+      ]}),
+    })],
     ["an empty catalog", async () => ({ok: true, json: async () => ({data: []})})],
   ])("starts without Tropass models after %s", async (_case, fetchModels) => {
     vi.spyOn(globalThis.console, "warn").mockImplementation(() => {});
